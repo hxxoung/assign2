@@ -2,104 +2,176 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define MAX_FILENAME_LENGTH 256
+#define MAX_METADATA_ENTRIES 100
+
 typedef struct {
-    char name[256];
+    char filename[MAX_FILENAME_LENGTH];
     int size;
 } FileMetadata;
+
+typedef struct {
+    FileMetadata entries[MAX_METADATA_ENTRIES];
+    int count;
+} ArchiveMetadata;
+
+void pack(const char* archiveFilename, const char* srcDirectory);
+void unpack(const char* archiveFilename, const char* destDirectory);
+void add(const char* archiveFilename, const char* targetFilename);
+void del(const char* archiveFilename, const char* targetFilename);
+void list(const char* archiveFilename);
+
+int main(int argc, char* argv[]) {
+    if (argc < 3) {
+        printf("Usage: %s <command> <archive-filename> [additional arguments]\n", argv[0]);
+        return 1;
+    }
+
+    const char* command = argv[1];
+    const char* archiveFilename = argv[2];
+
+    if (strcmp(command, "pack") == 0) {
+        const char* srcDirectory = argv[3];
+        pack(archiveFilename, srcDirectory);
+    } else if (strcmp(command, "unpack") == 0) {
+        const char* destDirectory = argv[3];
+        unpack(archiveFilename, destDirectory);
+    } else if (strcmp(command, "add") == 0) {
+        const char* targetFilename = argv[3];
+        add(archiveFilename, targetFilename);
+    } else if (strcmp(command, "del") == 0) {
+        const char* targetFilename = argv[3];
+        del(archiveFilename, targetFilename);
+    } else if (strcmp(command, "list") == 0) {
+        list(archiveFilename);
+    } else {
+        printf("Invalid command: %s\n", command);
+        return 1;
+    }
+
+    return 0;
+}
 
 void pack(const char* archiveFilename, const char* srcDirectory) {
     FILE* archiveFile = fopen(archiveFilename, "wb");
     if (archiveFile == NULL) {
-        printf("Error creating archive file.\n");
+        printf("Error opening archive file: %s\n", archiveFilename);
         return;
     }
 
-    // Open the source directory
-    DIR* directory = opendir(srcDirectory);
-    if (directory == NULL) {
-        printf("Error opening source directory.\n");
+    ArchiveMetadata metadata;
+    metadata.count = 0;
+
+    // Open source directory
+    DIR* srcDir = opendir(srcDirectory);
+    if (srcDir == NULL) {
+        printf("Error opening source directory: %s\n", srcDirectory);
         fclose(archiveFile);
         return;
     }
 
-    // Write file metadata to archive file
     struct dirent* entry;
-    FileMetadata metadata;
-    while ((entry = readdir(directory)) != NULL) {
-        if (entry->d_type == DT_REG) {  // Process regular files only
-            strcpy(metadata.name, entry->d_name);
+    while ((entry = readdir(srcDir)) != NULL) {
+        if (entry->d_type == DT_REG) { // Check if it's a regular file
+            // Get file path
+            char filePath[MAX_FILENAME_LENGTH];
+            snprintf(filePath, sizeof(filePath), "%s/%s", srcDirectory, entry->d_name);
 
-            // Get file size
-            char filePath[256];
-            sprintf(filePath, "%s/%s", srcDirectory, entry->d_name);
+            // Open the file
             FILE* srcFile = fopen(filePath, "rb");
-            if (srcFile == NULL) {
-                printf("Error opening source file: %s\n", entry->d_name);
-                continue;
-            }
-            fseek(srcFile, 0L, SEEK_END);
-            metadata.size = ftell(srcFile);
-            fclose(srcFile);
+            if (srcFile != NULL) {
+                // Get file size
+                fseek(srcFile, 0, SEEK_END);
+                int fileSize = ftell(srcFile);
+                fseek(srcFile, 0, SEEK_SET);
 
-            fwrite(&metadata, sizeof(FileMetadata), 1, archiveFile);
+                // Write file metadata to the archive
+                if (metadata.count < MAX_METADATA_ENTRIES) {
+                    strncpy(metadata.entries[metadata.count].filename, entry->d_name, MAX_FILENAME_LENGTH);
+                    metadata.entries[metadata.count].size = fileSize;
+                    metadata.count++;
+                }
+
+                // Write file contents to the archive
+                char buffer[1024];
+                size_t bytesRead;
+                while ((bytesRead = fread(buffer, 1, sizeof(buffer), srcFile)) > 0) {
+                    fwrite(buffer, 1, bytesRead, archiveFile);
+                }
+
+                fclose(srcFile);
+            }
         }
     }
 
-    closedir(directory);
+    closedir(srcDir);
+
+    // Write metadata to the archive
+    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
+
     fclose(archiveFile);
+
+    printf("Archiving files from %s to %s\n", srcDirectory, archiveFilename);
+    printf("%d file(s) archived.\n", metadata.count);
 }
 
 void unpack(const char* archiveFilename, const char* destDirectory) {
     FILE* archiveFile = fopen(archiveFilename, "rb");
     if (archiveFile == NULL) {
-        printf("Error opening archive file.\n");
+        printf("Error opening archive file: %s\n", archiveFilename);
         return;
     }
 
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
+
     // Create destination directory if it doesn't exist
-    mkdir(destDirectory, 0755);
+    mkdir(destDirectory, 0777);
 
-    // Read file metadata from archive file and unpack files
-    FileMetadata metadata;
-    while (fread(&metadata, sizeof(FileMetadata), 1, archiveFile) == 1) {
-        char destPath[256];
-        sprintf(destPath, "%s/%s", destDirectory, metadata.name);
+    char filePath[MAX_FILENAME_LENGTH];
 
-        FILE* destFile = fopen(destPath, "wb");
-        if (destFile == NULL) {
-            printf("Error creating destination file: %s\n", metadata.name);
-            continue;
+    for (int i = 0; i < metadata.count; i++) {
+        FileMetadata fileMetadata = metadata.entries[i];
+
+        // Create the file path in the destination directory
+        snprintf(filePath, sizeof(filePath), "%s/%s", destDirectory, fileMetadata.filename);
+
+        // Open the file in the destination directory
+        FILE* destFile = fopen(filePath, "wb");
+        if (destFile != NULL) {
+            // Copy file contents from the archive to the destination file
+            char buffer[1024];
+            int remainingBytes = fileMetadata.size;
+            while (remainingBytes > 0) {
+                int bytesToRead = (remainingBytes < sizeof(buffer)) ? remainingBytes : sizeof(buffer);
+                size_t bytesRead = fread(buffer, 1, bytesToRead, archiveFile);
+                fwrite(buffer, 1, bytesRead, destFile);
+                remainingBytes -= bytesRead;
+            }
+
+            fclose(destFile);
         }
-
-        // Copy data from archive file to destination file
-        char buffer[1024];
-        int bytesRead;
-        int totalBytesRead = 0;
-        while (totalBytesRead < metadata.size) {
-            bytesRead = fread(buffer, 1, sizeof(buffer), archiveFile);
-            fwrite(buffer, 1, bytesRead, destFile);
-            totalBytesRead += bytesRead;
-        }
-
-        fclose(destFile);
     }
 
     fclose(archiveFile);
+
+    printf("Unpacking files from %s to %s\n", archiveFilename, destDirectory);
 }
 
 void add(const char* archiveFilename, const char* targetFilename) {
-    FILE* archiveFile = fopen(archiveFilename, "ab");
+    FILE* archiveFile = fopen(archiveFilename, "r+b");
     if (archiveFile == NULL) {
-        printf("Error opening archive file.\n");
+        printf("Error opening archive file: %s\n", archiveFilename);
         return;
     }
 
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
+
     // Check if the target file already exists in the archive
-    FileMetadata metadata;
-    fseek(archiveFile, 0L, SEEK_SET);
-    while (fread(&metadata, sizeof(FileMetadata), 1, archiveFile) == 1) {
-        if (strcmp(metadata.name, targetFilename) == 0) {
-            printf("Error: File %s already exists in the archive.\n", targetFilename);
+    for (int i = 0; i < metadata.count; i++) {
+        if (strcmp(metadata.entries[i].filename, targetFilename) == 0) {
+            printf("Same file name already exists in the archive: %s\n", targetFilename);
             fclose(archiveFile);
             return;
         }
@@ -107,144 +179,113 @@ void add(const char* archiveFilename, const char* targetFilename) {
 
     // Open the target file
     FILE* targetFile = fopen(targetFilename, "rb");
-    if (targetFile == NULL) {
-        printf("Error opening target file.\n");
-        fclose(archiveFile);
-        return;
+    if (targetFile != NULL) {
+        // Get file size
+        fseek(targetFile, 0, SEEK_END);
+        int fileSize = ftell(targetFile);
+        fseek(targetFile, 0, SEEK_SET);
+
+        // Write file metadata to the archive
+        if (metadata.count < MAX_METADATA_ENTRIES) {
+            strncpy(metadata.entries[metadata.count].filename, targetFilename, MAX_FILENAME_LENGTH);
+            metadata.entries[metadata.count].size = fileSize;
+            metadata.count++;
+        }
+
+        // Write file contents to the archive
+        char buffer[1024];
+        size_t bytesRead;
+        while ((bytesRead = fread(buffer, 1, sizeof(buffer), targetFile)) > 0) {
+            fwrite(buffer, 1, bytesRead, archiveFile);
+        }
+
+        fclose(targetFile);
     }
 
-    // Get file size
-    fseek(targetFile, 0L, SEEK_END);
-    int fileSize = ftell(targetFile);
-    fseek(targetFile, 0L, SEEK_SET);
+    // Update the metadata in the archive
+    fseek(archiveFile, sizeof(ArchiveMetadata) * -1, SEEK_CUR);
+    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
 
-    // Write file metadata to archive file
-    strcpy(metadata.name, targetFilename);
-    metadata.size = fileSize;
-    fwrite(&metadata, sizeof(FileMetadata), 1, archiveFile);
-
-    // Copy data from target file to archive file
-    char buffer[1024];
-    int bytesRead;
-    while ((bytesRead = fread(buffer, 1, sizeof(buffer), targetFile)) > 0) {
-        fwrite(buffer, 1, bytesRead, archiveFile);
-    }
-
-    fclose(targetFile);
     fclose(archiveFile);
+
+    printf("Adding file %s to %s\n", targetFilename, archiveFilename);
+    printf("1 file added.\n");
 }
 
 void del(const char* archiveFilename, const char* targetFilename) {
-    FILE* archiveFile = fopen(archiveFilename, "rb");
+    FILE* archiveFile = fopen(archiveFilename, "r+b");
     if (archiveFile == NULL) {
-        printf("Error opening archive file.\n");
+        printf("Error opening archive file: %s\n", archiveFilename);
         return;
     }
 
-    FILE* tempFile = fopen("temp.arc", "wb");
-    if (tempFile == NULL) {
-        printf("Error creating temporary file.\n");
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
+
+    // Check if the target file exists in the archive
+    int targetIndex = -1;
+    for (int i = 0; i < metadata.count; i++) {
+        if (strcmp(metadata.entries[i].filename, targetFilename) == 0) {
+            targetIndex = i;
+            break;
+        }
+    }
+
+    if (targetIndex == -1) {
+        printf("No such file exists in the archive: %s\n", targetFilename);
         fclose(archiveFile);
         return;
     }
 
-    FileMetadata metadata;
-    while (fread(&metadata, sizeof(FileMetadata), 1, archiveFile) == 1) {
-        if (strcmp(metadata.name, targetFilename) == 0) {
-            // Skip this file in the archive
-            fseek(archiveFile, metadata.size, SEEK_CUR);
-        } else {
-            // Write the file metadata and data to the temporary file
-            fwrite(&metadata, sizeof(FileMetadata), 1, tempFile);
+    // Remove the file from the metadata
+    for (int i = targetIndex; i < metadata.count - 1; i++) {
+        metadata.entries[i] = metadata.entries[i + 1];
+    }
+    metadata.count--;
 
-            char buffer[1024];
-            int bytesRead;
-            int totalBytesRead = 0;
-            while (totalBytesRead < metadata.size) {
-                bytesRead = fread(buffer, 1, sizeof(buffer), archiveFile);
-                fwrite(buffer, 1, bytesRead, tempFile);
-                totalBytesRead += bytesRead;
-            }
-        }
+    // Update the metadata in the archive
+    fseek(archiveFile, sizeof(ArchiveMetadata) * -1, SEEK_CUR);
+    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
+
+    // Calculate the offset of the target file in the archive
+    int offset = sizeof(ArchiveMetadata) + targetIndex * (sizeof(FileMetadata) + metadata.entries[targetIndex].size);
+
+    // Remove the file from the archive by shifting the subsequent data
+    int remainingBytes = metadata.entries[targetIndex].size;
+    char buffer[1024];
+    while (remainingBytes > 0) {
+        int bytesRead = fread(buffer, 1, sizeof(buffer), archiveFile);
+        fseek(archiveFile, offset, SEEK_SET);
+        fwrite(buffer, 1, bytesRead, archiveFile);
+        remainingBytes -= bytesRead;
+        offset += bytesRead;
     }
 
-    fclose(archiveFile);
-    fclose(tempFile);
+    // Truncate the archive file to remove the remaining data
+    long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
+    ftruncate(fileno(archiveFile), fileSize);
 
-    // Replace the original archive file with the temporary file
-    remove(archiveFilename);
-    rename("temp.arc", archiveFilename);
+    fclose(archiveFile);
+
+    printf("Deleting file %s from %s\n", targetFilename, archiveFilename);
+    printf("1 file deleted.\n");
 }
 
 void list(const char* archiveFilename) {
     FILE* archiveFile = fopen(archiveFilename, "rb");
     if (archiveFile == NULL) {
-        printf("Error opening archive file.\n");
+        printf("Error opening archive file: %s\n", archiveFilename);
         return;
     }
 
-    FileMetadata metadata;
-    int fileCount = 0;
-    int totalSize = 0;
+    ArchiveMetadata metadata;
+    fread(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
 
-    while (fread(&metadata, sizeof(FileMetadata), 1, archiveFile) == 1) {
-        fileCount++;
-        totalSize += metadata.size;
-        printf("File Name: %s\n", metadata.name);
-        printf("File Size: %d bytes\n", metadata.size);
-        printf("-----------------\n");
-        fseek(archiveFile, metadata.size, SEEK_CUR);
+    printf("Listing files in %s\n", archiveFilename);
+    printf("%d file(s) exist.\n", metadata.count);
+    for (int i = 0; i < metadata.count; i++) {
+        printf("%s %d byte(s)\n", metadata.entries[i].filename, metadata.entries[i].size);
     }
-
-    printf("Total Files: %d\n", fileCount);
-    printf("Total Size: %d bytes\n", totalSize);
 
     fclose(archiveFile);
-}
-
-int main(int argc, char* argv[]) {
-    if (argc < 3) {
-        printf("Invalid number of arguments.\n");
-        return 1;
-    }
-
-    char* command = argv[1];
-    char* archiveFilename = argv[2];
-
-    if (strcmp(command, "pack") == 0) {
-        if (argc < 4) {
-            printf("Invalid number of arguments for pack.\n");
-            return 1;
-        }
-        char* srcDirectory = argv[3];
-        pack(archiveFilename, srcDirectory);
-    } else if (strcmp(command, "unpack") == 0) {
-        if (argc < 4) {
-            printf("Invalid number of arguments for unpack.\n");
-            return 1;
-        }
-        char* destDirectory = argv[3];
-        unpack(archiveFilename, destDirectory);
-    } else if (strcmp(command, "add") == 0) {
-        if (argc < 4) {
-            printf("Invalid number of arguments for add.\n");
-            return 1;
-        }
-        char* targetFilename = argv[3];
-        add(archiveFilename, targetFilename);
-    } else if (strcmp(command, "del") == 0) {
-        if (argc < 4) {
-            printf("Invalid number of arguments for del.\n");
-            return 1;
-        }
-        char* targetFilename = argv[3];
-        del(archiveFilename, targetFilename);
-    } else if (strcmp(command, "list") == 0) {
-        list(archiveFilename);
-    } else {
-        printf("Invalid command.\n");
-        return 1;
-    }
-
-    return 0;
 }
