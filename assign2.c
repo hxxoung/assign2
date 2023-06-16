@@ -263,6 +263,14 @@ void del(const char* archiveFilename, const char* targetFilename) {
         offset += bytesRead;
     }
 
+    // Set the file pointer to the correct position before truncation
+    fseek(archiveFile, offset, SEEK_SET);
+
+    // Truncate the archive file to remove the remaining data
+    long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
+    ftruncate(fileno(archiveFile), fileSize);
+
+
 
     // Truncate the archive file to remove the remaining data
     long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
