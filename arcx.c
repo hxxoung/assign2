@@ -247,66 +247,6 @@ void del(const char* archiveFilename, const char* targetFilename) {
     fwrite(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
 
     // Calculate the offset of the target file in the archive
-    int offset = sizeof(ArchiveMetadata) + targetIndex * sizeof(FileMetadata);
-    for (int i = 0; i < targetIndex; i++) {
-        offset += metadata.entries[i].size;
-    }
-
-    // Remove the file from the archive by shifting the subsequent data
-    int remainingBytes = metadata.entries[targetIndex].size;
-    char buffer[1024];
-    while (remainingBytes > 0) {
-        int bytesRead = fread(buffer, 1, sizeof(buffer), archiveFile);
-        fseek(archiveFile, offset, SEEK_SET);
-        fwrite(buffer, 1, bytesRead, archiveFile);
-        remainingBytes -= bytesRead;
-        offset += bytesRead;
-    }
-
-    // Truncate the archive file to remove the remaining data
-    long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
-    ftruncate(fileno(archiveFile), fileSize);
-
-    fclose(archiveFile);
-
-    printf("Deleted file %s from %s\n", targetFilename, archiveFilename);
-}
-void del(const char* archiveFilename, const char* targetFilename) {
-    FILE* archiveFile = fopen(archiveFilename, "r+b");
-    if (archiveFile == NULL) {
-        printf("Error opening archive file: %s\n", archiveFilename);
-        return;
-    }
-
-    ArchiveMetadata metadata;
-    fread(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
-
-    // Check if the target file exists in the archive
-    int targetIndex = -1;
-    for (int i = 0; i < metadata.count; i++) {
-        if (strcmp(metadata.entries[i].filename, targetFilename) == 0) {
-            targetIndex = i;
-            break;
-        }
-    }
-
-    if (targetIndex == -1) {
-        printf("No such file exists in the archive: %s\n", targetFilename);
-        fclose(archiveFile);
-        return;
-    }
-
-    // Remove the file from the metadata
-    for (int i = targetIndex; i < metadata.count - 1; i++) {
-        metadata.entries[i] = metadata.entries[i + 1];
-    }
-    metadata.count--;
-
-    // Update the metadata in the archive
-    fseek(archiveFile, 0, SEEK_SET);
-    fwrite(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
-
-    // Calculate the offset of the target file in the archive
     int offset = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
 
     for (int i = 0; i < targetIndex; i++) {
@@ -332,7 +272,6 @@ void del(const char* archiveFilename, const char* targetFilename) {
 
     printf("Deleted file %s from %s\n", targetFilename, archiveFilename);
 }
-
 
 void list(const char* archiveFilename) {
     FILE* archiveFile = fopen(archiveFilename, "rb");
