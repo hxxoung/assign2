@@ -270,12 +270,6 @@ void del(const char* archiveFilename, const char* targetFilename) {
     long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
     ftruncate(fileno(archiveFile), fileSize);
 
-
-
-    // Truncate the archive file to remove the remaining data
-    long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
-    ftruncate(fileno(archiveFile), fileSize);
-
     fclose(archiveFile);
 
     printf("Deleting file %s from %s\n", targetFilename, archiveFilename);
