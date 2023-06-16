@@ -243,11 +243,14 @@ void del(const char* archiveFilename, const char* targetFilename) {
     metadata.count--;
 
     // Update the metadata in the archive
-    fseek(archiveFile, sizeof(ArchiveMetadata) * -1, SEEK_CUR);
+    fseek(archiveFile, 0, SEEK_SET);
     fwrite(&metadata, sizeof(ArchiveMetadata), 1, archiveFile);
 
     // Calculate the offset of the target file in the archive
-    int offset = sizeof(ArchiveMetadata) + targetIndex * (sizeof(FileMetadata) + metadata.entries[targetIndex].size);
+    int offset = sizeof(ArchiveMetadata) + targetIndex * sizeof(FileMetadata);
+    for (int i = 0; i < targetIndex; i++) {
+        offset += metadata.entries[i].size;
+    }
 
     // Remove the file from the archive by shifting the subsequent data
     int remainingBytes = metadata.entries[targetIndex].size;
@@ -260,9 +263,6 @@ void del(const char* archiveFilename, const char* targetFilename) {
         offset += bytesRead;
     }
 
-    // Set the file pointer to the correct position before truncation
-    fseek(archiveFile, offset, SEEK_SET);
-
     // Truncate the archive file to remove the remaining data
     long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
     ftruncate(fileno(archiveFile), fileSize);
@@ -271,6 +271,7 @@ void del(const char* archiveFilename, const char* targetFilename) {
 
     printf("Deleted file %s from %s\n", targetFilename, archiveFilename);
 }
+
 
 void list(const char* archiveFilename) {
     FILE* archiveFile = fopen(archiveFilename, "rb");
