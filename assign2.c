@@ -261,6 +261,7 @@ void del(const char* archiveFilename, const char* targetFilename) {
         offset += bytesRead;
     }
 
+
     // Truncate the archive file to remove the remaining data
     long fileSize = sizeof(ArchiveMetadata) + metadata.count * sizeof(FileMetadata);
     ftruncate(fileno(archiveFile), fileSize);
