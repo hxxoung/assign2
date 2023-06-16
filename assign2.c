@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
+
 
 #define MAX_FILENAME_LENGTH 256
 #define MAX_METADATA_ENTRIES 100
